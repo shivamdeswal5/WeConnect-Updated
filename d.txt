@@ -1,241 +1,657 @@
-"use client";
-
+'use client';
+import { db } from '@/firebase/firebase';
+import { RootState } from '@/store';
+import { addMessage } from '@/store/chatSlice';
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
+import SendIcon from '@mui/icons-material/Send';
 import {
   Avatar,
   Box,
-  Typography,
-  TextField,
+  IconButton,
   InputAdornment,
-  Badge,
-} from "@mui/material";
-import SearchIcon from "@mui/icons-material/Search";
-import { useEffect, useState } from "react";
-import { fetchUsersBatch } from "@/firebase/user-service";
-import { useDispatch, useSelector } from "react-redux";
-import { setCurrentChatId } from "@/store/chatSlice";
-import { RootState } from "@/store";
-import { db } from "@/firebase/firebase";
-import { get, onValue, ref } from "firebase/database";
-import InfiniteScroll from "react-infinite-scroll-component";
+  Popover,
+  TextField,
+  Typography,
+} from '@mui/material';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import {
+  get,
+  onDisconnect,
+  onValue,
+  push,
+  ref,
+  set,
+} from 'firebase/database';
+import { useEffect, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import StarterKit from "@tiptap/starter-kit";
+import {
+  MenuButtonBold,
+  MenuButtonItalic,
+  MenuControlsContainer,
+  MenuDivider,
+  MenuSelectHeading,
+  RichTextEditor,
+  type RichTextEditorRef,
+} from "mui-tiptap";
 
-type SomeFunction = (...args: any[]) => void;
-
-interface IUser {
-  uid?: string;
-  email?: string;
-  photoURL?: string;
-  displayName?: string;
-  lastMessage?: string;
-  unreadCount?: number;
+interface IMessage {
+  text: string;
+  senderId: string;
+  timestamp: number;
 }
 
-const Contacts = () => {
-  const [users, setUsers] = useState<IUser[]>([]);
-  const [filteredUsers, setFilteredUsers] = useState<IUser[]>([]);
-  const [search, setSearch] = useState("");
-  const [lastEmail, setLastEmail] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const LIMIT = 10;
-
+const Chat = () => {
+  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState('Offline');
+  const [messages, setMessagesState] = useState<IMessage[]>([]);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const editorRef = useRef<RichTextEditorRef>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const dispatch = useDispatch();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingStartedRef = useRef(false);
+
   const currentChatId = useSelector(
     (state: RootState) => state.chat.currentChatId
   );
 
   const currentUser =
-    typeof window !== "undefined"
-      ? JSON.parse(localStorage.getItem("user") || "{}")
+    typeof window !== 'undefined'
+      ? JSON.parse(localStorage.getItem('user') || '{}')
+      : {};
+  const selectedUser =
+    typeof window !== 'undefined'
+      ? JSON.parse(localStorage.getItem('selectedUser') || '{}')
       : {};
 
-  const debounce = (func: SomeFunction, wait: number) => {
-    let timerId: ReturnType<typeof setTimeout>;
-    return (...args: unknown[]) => {
-      clearTimeout(timerId);
-      timerId = setTimeout(() => func(...args), wait);
-    };
-  };
+  useEffect(() => {
+    if (!currentUser?.uid) return;
 
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSearch(e.target.value);
-  };
-
-  const debounceCall = debounce(handleSearch, 600);
-
-  const handleContactClick = (contact: IUser) => {
-    if (!currentUser.uid || !contact.uid) return;
-    const chatId = [currentUser.uid, contact.uid].sort().join("_");
-    localStorage.setItem("currentChatId", JSON.stringify(chatId));
-    dispatch(setCurrentChatId(chatId));
-    localStorage.setItem("selectedUser", JSON.stringify(contact));
-  };
-
-  const fetchNextBatch = async () => {
-    const fetched = await fetchUsersBatch(currentUser.uid, lastEmail, LIMIT);
-
-    if (fetched.length === 0) {
-      setHasMore(false);
-      return;
-    }
-
-    const updatedUsers = await Promise.all(
-      fetched.map(async (user) => {
-        const chatId = [currentUser.uid, user.uid].sort().join("_");
-        const lastMsgRef = ref(db, `lastMessages/${chatId}`);
-        const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${chatId}`);
-
-        const lastMsgSnap = await get(lastMsgRef);
-        const unreadSnap = await get(unreadRef);
-
-        return {
-          ...user,
-          lastMessage: lastMsgSnap.val()?.text || "",
-          unreadCount: unreadSnap.val() || 0,
-        };
-      })
-    );
-
-    setUsers((prev) => [...prev, ...updatedUsers]);
-    setLastEmail(fetched[fetched.length - 1].email);
-  };
+    const userRef = ref(db, `onlineUsers/${currentUser.uid}`);
+    set(userRef, true);
+    onDisconnect(userRef).set(false);
+  }, []);
 
   useEffect(() => {
-    if (currentUser.uid) {
-      fetchNextBatch();
-    }
+    if (!currentChatId) return;
 
-    return () => {
-      setUsers([]);
-      setLastEmail(null);
-      setHasMore(true);
-    };
-  }, [currentUser.uid]);
-
-  useEffect(() => {
-    const filtered = users.filter((u) =>
-      (u.displayName || u.email || "")
-        .toLowerCase()
-        .includes(search.toLowerCase())
-    );
-    setFilteredUsers(filtered);
-  }, [search, users]);
-
-
-  useEffect(() => {
-    const unsubscribers: Array<() => void> = [];
-
-    users.forEach((user) => {
-      const chatId = [currentUser.uid, user.uid].sort().join("_");
-
-      const lastMsgRef = ref(db, `lastMessages/${chatId}`);
-      const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${chatId}`);
-
-      const unsub1 = onValue(lastMsgRef, (snapshot) => {
-        const msg = snapshot.val()?.text || "";
-        setUsers((prev) =>
-          prev.map((u) =>
-            u.uid === user.uid ? { ...u, lastMessage: msg } : u
-          )
-        );
+    const chatRef = ref(db, `messages/${currentChatId}`);
+    const unsubscribe = onValue(chatRef, (snapshot) => {
+      const msgs: IMessage[] = [];
+      snapshot.forEach((childSnapshot) => {
+        const data = childSnapshot.val();
+        msgs.push(data);
+        dispatch(addMessage(data));
       });
+      setMessagesState(msgs);
+      setTimeout(() => {
+        scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+    });
 
-      const unsub2 = onValue(unreadRef, (snapshot) => {
-        const count = snapshot.val() || 0;
-        setUsers((prev) =>
-          prev.map((u) =>
-            u.uid === user.uid ? { ...u, unreadCount: count } : u
-          )
+    const unreadRef = ref(
+      db,
+      `unreadMessages/${currentUser.uid}/${currentChatId}`
+    );
+    set(unreadRef, 0);
+
+    return () => unsubscribe();
+  }, [currentChatId]);
+
+  useEffect(() => {
+    if (!selectedUser?.uid || !currentChatId || !currentUser?.uid) return;
+
+    const statusRef = ref(db, `onlineUsers/${selectedUser.uid}`);
+    const unsubscribeStatus = onValue(statusRef, (snapshot) => {
+      const isOnline = snapshot.val();
+      setStatus(isOnline ? 'Online' : 'Offline');
+    });
+
+    const typingRef = ref(
+      db,
+      `typingStatus/${currentChatId}/${selectedUser.uid}`
+    );
+    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
+      const isTyping = snapshot.val();
+      if (isTyping) setStatus('Typing...');
+      else {
+        const onlineRef = ref(db, `onlineUsers/${selectedUser.uid}`);
+        onValue(
+          onlineRef,
+          (snap) => {
+            setStatus(snap.val() ? 'Online' : 'Offline');
+          },
+          { onlyOnce: true }
         );
-      });
-
-      unsubscribers.push(() => unsub1());
-      unsubscribers.push(() => unsub2());
+      }
     });
 
     return () => {
-      unsubscribers.forEach((unsub) => unsub());
+      unsubscribeStatus();
+      unsubscribeTyping();
     };
-  }, [users]);
+  }, [selectedUser?.uid, currentChatId]);
+
+  const handleTyping = () => {
+    if (!currentChatId || !currentUser?.uid) return;
+
+    const typingRef = ref(
+      db,
+      `typingStatus/${currentChatId}/${currentUser.uid}`
+    );
+
+    if (!typingStartedRef.current) {
+      set(typingRef, true);
+      typingStartedRef.current = true;
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      set(typingRef, false);
+      typingStartedRef.current = false;
+    }, 1000);
+  };
+
+  const handleSend = () => {
+    const plainText = editorRef.current?.editor?.getText().trim();
+    const htmlContent = editorRef.current?.editor?.getHTML();
+
+    if (!message.trim() || !currentChatId || !currentUser?.uid || !plainText || !currentChatId || !currentUser?.uid) return;
+
+    const newMsg: IMessage = {
+      text: htmlContent ?? message,
+      senderId: currentUser.uid,
+      timestamp: Date.now(),
+    };
+
+    const chatRef = ref(db, `messages/${currentChatId}`);
+    push(chatRef, newMsg);
+    const lastMsgRef = ref(db, `lastMessages/${currentChatId}`);
+    set(lastMsgRef, {
+      ...newMsg,
+      receiverId: selectedUser.uid,
+    });
+
+    const unreadRef = ref(
+      db,
+      `unreadMessages/${selectedUser.uid}/${currentChatId}`
+    );
+    get(unreadRef).then((snap) => {
+      const currentCount = snap.val() || 0;
+      set(unreadRef, currentCount + 1);
+    });
+
+    setMessage('');
+     editorRef.current?.editor?.commands.clearContent();
+  };
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+     const emoji = emojiData.emoji;
+    editorRef.current?.editor?.commands.insertContent(emoji);;
+  };
 
   return (
-    <Box
-      display="flex"
-      flexDirection="column"
-      height="100vh"
-      sx={{
-        width: "300px",
-        borderRight: "1px solid #ccc",
-        boxSizing: "border-box",
-        px: 2,
-        pt: 2,
-      }}
-    >
-      <Typography variant="h4">Messages</Typography>
-
-      <TextField
-        fullWidth
-        placeholder="Search users..."
-        variant="outlined"
-        onChange={debounceCall}
-        sx={{ my: 2 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon />
-            </InputAdornment>
-          ),
-        }}
-      />
-
-      <Box flex={1} overflow="auto" pr={1} id="scrollableDiv"
-        sx={{
-          '&::-webkit-scrollbar': {
-            display: 'none',
-          },
-        }}  >
-        <InfiniteScroll
-          dataLength={users.length}
-          next={fetchNextBatch}
-          hasMore={hasMore}
-          loader={<Typography textAlign="center">Loading...</Typography>}
-          scrollableTarget="scrollableDiv"
-        >
-          {filteredUsers.map((item, index) => (
-            <Box
-              key={index}
-              display="flex"
-              alignItems="center"
-              padding="10px"
-              borderBottom="1px solid #ccc"
-              sx={{ cursor: "pointer" }}
-              onClick={() => handleContactClick(item)}
-            >
-              <Badge
-                color="error"
-                badgeContent={item.unreadCount || 0}
-                invisible={!item.unreadCount}
-                overlap="circular"
+    <Box flex={3} display="flex" flexDirection="column" height="100vh" width="100%">
+      {currentChatId ? (
+        <>
+          <Box
+            display="flex"
+            alignItems="center"
+            px={2}
+            py={1}
+            borderBottom="1px solid #ccc"
+            bgcolor="#f5f5f5"
+          >
+            <Avatar src={selectedUser.photoURL || ''} />
+            <Box ml={2}>
+              <Typography variant="subtitle1">
+                {selectedUser.displayName || selectedUser.name || selectedUser.email}
+              </Typography>
+              <Typography
+                variant="caption"
+                color={
+                  status === 'Online' || status === 'Typing...'
+                    ? 'green'
+                    : 'textSecondary'
+                }
               >
-                <Avatar src={item.photoURL || ""} sx={{ mr: 1.5 }} />
-              </Badge>
-              <Box>
-                <Typography variant="body1">
-                  {item.displayName || item.email?.split("@")[0]}
-                </Typography>
-                <Typography
-                  variant="caption"
-                  color="textSecondary"
-                  noWrap
-                  width="180px"
-                >
-                  {item.lastMessage || "No messages yet"}
-                </Typography>
-              </Box>
+                {status}
+              </Typography>
             </Box>
-          ))}
-        </InfiniteScroll>
-      </Box>
+          </Box>
+
+          <Box
+            flex={1}
+            p={2}
+            overflow="auto"
+            sx={{
+              backgroundColor: '#fafafa',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            {messages.map((msg, index) => (
+              <Box
+                key={index}
+                alignSelf={
+                  msg.senderId === currentUser.uid ? 'flex-end' : 'flex-start'
+                }
+                bgcolor={msg.senderId === currentUser.uid ? '#DCF8C6' : '#d2d4cff9'}
+                p={1.2}
+                borderRadius={2}
+                maxWidth="70%"
+                sx={{ wordBreak: 'break-word' }}
+              >
+                <div
+                  dangerouslySetInnerHTML={{ __html: msg.text }}
+                  style={{ fontSize: '14px' }}
+                />
+              </Box>
+            ))}
+            <div ref={scrollRef} />
+          </Box>
+
+          <Box px={2} py={1} borderTop="1px solid #ccc" bgcolor="#f5f5f5">
+            <RichTextEditor
+              ref={editorRef}
+              content=""
+              extensions={[StarterKit]}
+              onUpdate={({ editor }) => {
+                setMessage(editor.getHTML());
+                handleTyping();
+              }}
+              editorProps={{
+                handleKeyDown: (_view, event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSend();
+                    return true;
+                  }
+                  return false;
+                },
+              }}
+              renderControls={() => (
+                <MenuControlsContainer>
+                  <MenuSelectHeading />
+                  <MenuDivider />
+                  <MenuButtonBold />
+                  <MenuButtonItalic />
+                  <MenuDivider />
+                  <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+                    <EmojiEmotionsIcon />
+                  </IconButton>
+                  <IconButton onClick={handleSend}>
+                    <SendIcon />
+                  </IconButton>
+                </MenuControlsContainer>
+              )}
+            />
+            <Popover
+              open={Boolean(anchorEl)}
+              anchorEl={anchorEl}
+              onClose={() => setAnchorEl(null)}
+              anchorOrigin={{
+                vertical: 'top',
+                horizontal: 'left',
+              }}
+              transformOrigin={{
+                vertical: 'bottom',
+                horizontal: 'left',
+              }}
+            >
+              <EmojiPicker onEmojiClick={handleEmojiClick} height={350} />
+            </Popover>
+
+          </Box>
+        </>
+      ) : (
+        <Box flex={1} display="flex" alignItems="center" justifyContent="center">
+          <Typography variant="h6" color="textSecondary">
+            Select a contact to start chatting
+          </Typography>
+        </Box>
+      )}
     </Box>
   );
 };
 
-export default Contacts;
+export default Chat;
+
+
+// with scroll
+'use client';
+
+import { db } from '@/firebase/firebase';
+import { RootState } from '@/store';
+import { addMessage } from '@/store/chatSlice';
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
+import SendIcon from '@mui/icons-material/Send';
+import {
+  Avatar,
+  Box,
+  IconButton,
+  Popover,
+  Typography,
+} from '@mui/material';
+import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
+import {
+  get,
+  limitToLast,
+  onChildAdded,
+  onDisconnect,
+  onValue,
+  orderByChild,
+  query,
+  ref,
+  startAt,
+  endAt,
+  push,
+  set,
+} from 'firebase/database';
+import { useEffect, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import StarterKit from '@tiptap/starter-kit';
+import {
+  MenuButtonBold,
+  MenuButtonItalic,
+  MenuControlsContainer,
+  MenuDivider,
+  MenuSelectHeading,
+  RichTextEditor,
+  type RichTextEditorRef,
+} from 'mui-tiptap';
+interface IMessage {
+  text: string;
+  senderId: string;
+  timestamp: number;
+}
+const MESSAGES_BATCH_SIZE = 20;
+const Chat = () => {
+  const [message, setMessage] = useState('');
+  const [status, setStatus] = useState('Offline');
+  const [messages, setMessages] = useState<IMessage[]>([]);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const editorRef = useRef<RichTextEditorRef>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const chatBoxRef = useRef<HTMLDivElement>(null);
+  const oldestTimestampRef = useRef<number | null>(null);
+  const dispatch = useDispatch();
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const typingStartedRef = useRef(false);
+
+  const currentChatId = useSelector((state: RootState) => state.chat.currentChatId);
+  const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
+  const selectedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('selectedUser') || '{}') : {};
+
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    const userRef = ref(db, `onlineUsers/${currentUser.uid}`);
+    set(userRef, true);
+    onDisconnect(userRef).set(false);
+  }, []);
+
+  useEffect(() => {
+    if (!currentChatId) return;
+    fetchInitialMessages();
+
+    const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${currentChatId}`);
+    set(unreadRef, 0);
+
+    return () => {
+      setMessages([]);
+      oldestTimestampRef.current = null;
+      setHasMore(true);
+    };
+  }, [currentChatId]);
+
+  const fetchInitialMessages = async () => {
+    const msgRef = query(
+      ref(db, `messages/${currentChatId}`),
+      orderByChild('timestamp'),
+      limitToLast(MESSAGES_BATCH_SIZE)
+    );
+
+    get(msgRef).then((snapshot) => {
+      const data: IMessage[] = [];
+      snapshot.forEach((child) => {
+        const val = child.val();
+        data.push(val);
+      });
+
+      if (data.length > 0) {
+        const sorted = data.sort((a, b) => a.timestamp - b.timestamp);
+        oldestTimestampRef.current = sorted[0].timestamp;
+        setMessages(sorted);
+        dispatch(addMessage(sorted[sorted.length - 1]));
+
+        setTimeout(() => {
+          scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 100);
+      } else {
+        setHasMore(false);
+      }
+    });
+  };
+
+  const loadOlderMessages = async () => {
+    if (!hasMore || loadingMore || !oldestTimestampRef.current) return;
+    setLoadingMore(true);
+    const chatRef = query(
+      ref(db, `messages/${currentChatId}`),
+      orderByChild('timestamp'),
+      endAt(oldestTimestampRef.current - 1),
+      limitToLast(MESSAGES_BATCH_SIZE)
+    );
+
+    const prevScrollHeight = chatBoxRef.current?.scrollHeight || 0;
+
+    get(chatRef).then((snapshot) => {
+      const older: IMessage[] = [];
+      snapshot.forEach((child) => {
+        const val = child.val();
+        older.push(val);
+      });
+
+      if (older.length > 0) {
+        const sorted = older.sort((a, b) => a.timestamp - b.timestamp);
+        oldestTimestampRef.current = sorted[0].timestamp;
+        setMessages((prev) => [...sorted, ...prev]);
+      } else {
+        setHasMore(false);
+      }
+
+      setTimeout(() => {
+        const newScrollHeight = chatBoxRef.current?.scrollHeight || 0;
+        chatBoxRef.current?.scrollTo(0, newScrollHeight - prevScrollHeight);
+      }, 50);
+
+      setLoadingMore(false);
+    });
+  };
+
+  useEffect(() => {
+    if (!selectedUser?.uid || !currentChatId || !currentUser?.uid) return;
+
+    const statusRef = ref(db, `onlineUsers/${selectedUser.uid}`);
+    const unsubscribeStatus = onValue(statusRef, (snapshot) => {
+      setStatus(snapshot.val() ? 'Online' : 'Offline');
+    });
+
+    const typingRef = ref(db, `typingStatus/${currentChatId}/${selectedUser.uid}`);
+    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
+      const isTyping = snapshot.val();
+      if (isTyping) setStatus('Typing...');
+      else {
+        const onlineRef = ref(db, `onlineUsers/${selectedUser.uid}`);
+        onValue(onlineRef, (snap) => {
+          setStatus(snap.val() ? 'Online' : 'Offline');
+        }, { onlyOnce: true });
+      }
+    });
+
+    return () => {
+      unsubscribeStatus();
+      unsubscribeTyping();
+    };
+  }, [selectedUser?.uid, currentChatId]);
+
+  const handleTyping = () => {
+    if (!currentChatId || !currentUser?.uid) return;
+    const typingRef = ref(db, `typingStatus/${currentChatId}/${currentUser.uid}`);
+
+    if (!typingStartedRef.current) {
+      set(typingRef, true);
+      typingStartedRef.current = true;
+    }
+
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = setTimeout(() => {
+      set(typingRef, false);
+      typingStartedRef.current = false;
+    }, 2000);
+  };
+
+  const handleSend = () => {
+    const plainText = editorRef.current?.editor?.getText().trim();
+    const htmlContent = editorRef.current?.editor?.getHTML();
+    if (!plainText || !currentChatId || !currentUser?.uid) return;
+
+    const newMsg: IMessage = {
+      text: htmlContent ?? '',
+      senderId: currentUser.uid,
+      timestamp: Date.now(),
+    };
+
+    const chatRef = ref(db, `messages/${currentChatId}`);
+    push(chatRef, newMsg);
+    set(ref(db, `lastMessages/${currentChatId}`), {
+      ...newMsg,
+      receiverId: selectedUser.uid,
+    });
+
+    const unreadRef = ref(db, `unreadMessages/${selectedUser.uid}/${currentChatId}`);
+    get(unreadRef).then((snap) => {
+      const currentCount = snap.val() || 0;
+      set(unreadRef, currentCount + 1);
+    });
+
+    setMessage('');
+    editorRef.current?.editor?.commands.clearContent();
+  };
+
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    editorRef.current?.editor?.commands.insertContent(emojiData.emoji);
+  };
+
+  return (
+    <Box flex={3} display="flex" flexDirection="column" height="100vh" width="100%">
+      {currentChatId ? (
+        <>
+          {/* Header */}
+          <Box display="flex" alignItems="center" px={2} py={1} borderBottom="1px solid #ccc" bgcolor="#f5f5f5">
+            <Avatar src={selectedUser.photoURL || ''} />
+            <Box ml={2}>
+              <Typography variant="subtitle1">
+                {selectedUser.displayName || selectedUser.name || selectedUser.email}
+              </Typography>
+              <Typography variant="caption" color={status === 'Online' || status === 'Typing...' ? 'green' : 'textSecondary'}>
+                {status}
+              </Typography>
+            </Box>
+          </Box>
+
+          {/* Messages */}
+          <Box
+            ref={chatBoxRef}
+            flex={1}
+            p={2}
+            overflow="auto"
+            sx={{ backgroundColor: '#fafafa', display: 'flex', flexDirection: 'column', gap: '8px' }}
+            onScroll={(e) => {
+              if ((e.currentTarget.scrollTop || 0) === 0 && hasMore) {
+                loadOlderMessages();
+              }
+            }}
+          >
+            {messages.map((msg, index) => (
+              <Box
+                key={index}
+                alignSelf={msg.senderId === currentUser.uid ? 'flex-end' : 'flex-start'}
+                bgcolor={msg.senderId === currentUser.uid ? '#DCF8C6' : '#d2d4cff9'}
+                p={1.2}
+                borderRadius={2}
+                maxWidth="70%"
+                sx={{ wordBreak: 'break-word' }}
+              >
+                <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{ fontSize: '14px' }} />
+              </Box>
+            ))}
+            <div ref={scrollRef} />
+          </Box>
+
+          {/* Input */}
+          <Box px={2} py={1} borderTop="1px solid #ccc" bgcolor="#f5f5f5">
+            <RichTextEditor
+              ref={editorRef}
+              content=""
+              extensions={[StarterKit]}
+              onUpdate={({ editor }) => {
+                setMessage(editor.getHTML());
+                handleTyping();
+              }}
+              editorProps={{
+                handleKeyDown: (_view, event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSend();
+                    return true;
+                  }
+                  return false;
+                },
+              }}
+              renderControls={() => (
+                <MenuControlsContainer>
+                  <MenuSelectHeading />
+                  <MenuDivider />
+                  <MenuButtonBold />
+                  <MenuButtonItalic />
+                  <MenuDivider />
+                  <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+                    <EmojiEmotionsIcon />
+                  </IconButton>
+                  <IconButton onClick={handleSend}>
+                    <SendIcon />
+                  </IconButton>
+                </MenuControlsContainer>
+              )}
+            />
+            <Popover
+              open={Boolean(anchorEl)}
+              anchorEl={anchorEl}
+              onClose={() => setAnchorEl(null)}
+              anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
+              transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+            >
+              <EmojiPicker onEmojiClick={handleEmojiClick} height={350} />
+            </Popover>
+          </Box>
+        </>
+      ) : (
+        <Box flex={1} display="flex" alignItems="center" justifyContent="center">
+          <Typography variant="h6" color="textSecondary">Select a contact to start chatting</Typography>
+        </Box>
+      )}
+    </Box>
+  );
+};
+export default Chat; 
