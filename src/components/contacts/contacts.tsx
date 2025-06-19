@@ -13,7 +13,7 @@ import {
   Typography,
 } from "@mui/material";
 import { get, onValue, ref } from "firebase/database";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import InfiniteScroll from "react-infinite-scroll-component";
 import { useDispatch } from "react-redux";
 import { format, isYesterday, isToday } from "date-fns";
@@ -36,6 +36,7 @@ const Contacts = () => {
   const [hasMore, setHasMore] = useState(true);
   const [initialLoading, setInitialLoading] = useState(true);
   const [isFetchingMore, setIsFetchingMore] = useState(false);
+  const listenersMap = useRef<Map<string, () => void>>(new Map());
   const LIMIT = 10;
 
   const dispatch = useDispatch();
@@ -129,6 +130,8 @@ const Contacts = () => {
     }
 
     return () => {
+      listenersMap.current.forEach((unsubscribe) => unsubscribe());
+      listenersMap.current.clear();
       setUsers([]);
       setLastEmail(null);
       setHasMore(true);
@@ -136,12 +139,14 @@ const Contacts = () => {
   }, [currentUser.uid, search]);
 
   useEffect(() => {
-    const unsubscribers: Array<() => void> = [];
+    // Remove previous listeners before setting new ones
+    listenersMap.current.forEach((unsub) => unsub());
+    listenersMap.current.clear();
 
     users.forEach((user) => {
       if (!user.uid) return;
-
       const chatId = [currentUser.uid, user.uid].sort().join("_");
+
       const lastMsgRef = ref(db, `lastMessages/${chatId}`);
       const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${chatId}`);
       const statusRef = ref(db, `status/${user.uid}`);
@@ -179,29 +184,14 @@ const Contacts = () => {
         );
       });
 
-      unsubscribers.push(() => unsub1());
-      unsubscribers.push(() => unsub2());
-      unsubscribers.push(() => unsub3());
+      listenersMap.current.set(`last-${user.uid}`, () => unsub1());
+      listenersMap.current.set(`unread-${user.uid}`, () => unsub2());
+      listenersMap.current.set(`status-${user.uid}`, () => unsub3());
     });
-
-    return () => {
-      unsubscribers.forEach((unsub) => unsub());
-    };
-  }, [currentUser.uid]);
+  }, [users.map((u) => u.uid).join(",")]); 
 
   return (
-    <Box
-      display="flex"
-      flexDirection="column"
-      height="100vh"
-      sx={{
-        width: "400px",
-        borderRight: "1px solid #ccc",
-        boxSizing: "border-box",
-        px: 2,
-        pt: 2,
-      }}
-    >
+    <Box display="flex" flexDirection="column" height="100vh" sx={{ width: "400px", borderRight: "1px solid #ccc", boxSizing: "border-box", px: 2, pt: 2 }}>
       <Typography variant="h4">Messages</Typography>
 
       <TextField
@@ -220,28 +210,14 @@ const Contacts = () => {
         }}
       />
 
-      <Box
-        flex={1}
-        overflow="auto"
-        pr={1}
-        id="scrollableDiv"
-        sx={{ "&::-webkit-scrollbar": { display: "none" } }}
-      >
+      <Box flex={1} overflow="auto" pr={1} id="scrollableDiv" sx={{ "&::-webkit-scrollbar": { display: "none" } }}>
         <InfiniteScroll
           dataLength={users.length}
           next={fetchNextBatch}
           hasMore={hasMore}
           scrollableTarget="scrollableDiv"
-          loader={
-            <Typography textAlign="center" py={1}>
-              {(initialLoading || isFetchingMore) && "Loading..."}
-            </Typography>
-          }
-          endMessage={
-            <Typography textAlign="center" py={2} color="textSecondary">
-              No more contacts
-            </Typography>
-          }
+          loader={<Typography textAlign="center" py={1}>{(initialLoading || isFetchingMore) && "Loading..."}</Typography>}
+          endMessage={<Typography textAlign="center" py={2} color="textSecondary">No more contacts</Typography>}
         >
           {users.map((item) => (
             <Box
@@ -276,23 +252,16 @@ const Contacts = () => {
                     {item.displayName || item.email?.split("@")[0]}
                   </Typography>
                   {item.lastMessage && item.lastMessageTime && (
-                    <Typography
-                      variant="caption"
-                      color="textSecondary"
-                      sx={{ ml: 1, whiteSpace: "nowrap" }}
-                    >
+                    <Typography variant="caption" color="textSecondary" sx={{ ml: 1, whiteSpace: "nowrap" }}>
                       {formatTimestamp(item.lastMessageTime)}
                     </Typography>
                   )}
                 </Box>
-
                 <Typography
                   variant="caption"
                   color="textSecondary"
                   noWrap
-                  dangerouslySetInnerHTML={{
-                    __html: item.lastMessage || "No messages yet",
-                  }}
+                  dangerouslySetInnerHTML={{ __html: item.lastMessage || "No messages yet" }}
                   sx={{ maxWidth: "200px" }}
                 />
               </Box>
@@ -304,4 +273,4 @@ const Contacts = () => {
   );
 };
 
-export default Contacts;
+export default Contacts

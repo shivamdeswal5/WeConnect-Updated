@@ -1,43 +1,43 @@
 'use client';
-import { db } from '@/firebase/firebase';
-import { RootState } from '@/store';
-import { addMessage } from '@/store/chatSlice';
-import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
-import SendIcon from '@mui/icons-material/Send';
+
 import {
-  Avatar,
   Box,
+  Typography,
+  Avatar,
   IconButton,
   Popover,
-  Typography,
 } from '@mui/material';
+import EmojiEmotionsIcon from '@mui/icons-material/EmojiEmotions';
+import SendIcon from '@mui/icons-material/Send';
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import {
-  get,
-  limitToLast,
-  onChildAdded,
-  onDisconnect,
-  onValue,
-  orderByChild,
-  query,
   ref,
-  startAt,
-  endAt,
-  push,
   set,
+  push,
+  get,
+  onChildAdded,
+  query,
+  orderByChild,
+  limitToLast,
+  endAt,
+  startAt,
+  onValue,
 } from 'firebase/database';
-import { useEffect, useRef, useState } from 'react';
+import { db } from '@/firebase/firebase';
 import { useDispatch, useSelector } from 'react-redux';
-import StarterKit from '@tiptap/starter-kit';
+import { RootState } from '@/store';
+import { addMessage } from '@/store/chatSlice';
+import { useEffect, useRef, useState } from 'react';
 import {
-  MenuButtonBold,
-  MenuButtonItalic,
-  MenuControlsContainer,
-  MenuDivider,
-  MenuSelectHeading,
   RichTextEditor,
   type RichTextEditorRef,
+  MenuControlsContainer,
+  MenuButtonBold,
+  MenuButtonItalic,
+  MenuDivider,
+  MenuSelectHeading,
 } from 'mui-tiptap';
+import StarterKit from '@tiptap/starter-kit';
 
 interface IMessage {
   text: string;
@@ -48,94 +48,105 @@ interface IMessage {
 const MESSAGES_BATCH_SIZE = 20;
 
 const Chat = () => {
-  const [message, setMessage] = useState('');
-  const [status, setStatus] = useState('Offline');
   const [messages, setMessages] = useState<IMessage[]>([]);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const editorRef = useRef<RichTextEditorRef>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const chatBoxRef = useRef<HTMLDivElement>(null);
-  const oldestTimestampRef = useRef<number | null>(null);
-  const dispatch = useDispatch();
-  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const typingStartedRef = useRef(false);
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [status, setStatus] = useState('Offline');
 
+  const dispatch = useDispatch();
   const currentChatId = useSelector((state: RootState) => state.chat.currentChatId);
   const currentUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || '{}') : {};
   const selectedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('selectedUser') || '{}') : {};
 
-  useEffect(() => {
-    if (!currentUser?.uid) return;
-    const userRef = ref(db, `onlineUsers/${currentUser.uid}`);
-    set(userRef, true);
-    onDisconnect(userRef).set(false);
-  }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const chatBoxRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<RichTextEditorRef>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const oldestTimestampRef = useRef<number | null>(null);
+
+  // Typing status setup
+  const handleTyping = () => {
+    const typingRef = ref(db, `typingStatus/${currentChatId}/${currentUser.uid}`);
+    set(typingRef, true);
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+
+    typingTimeoutRef.current = setTimeout(() => {
+      set(typingRef, false);
+    }, 2000);
+  };
 
   useEffect(() => {
-    if (!currentChatId) return;
+    if (!currentChatId || !currentUser?.uid) return;
 
-    let liveListenerUnsub: (() => void) | null = null;
+    const msgRef = query(
+      ref(db, `messages/${currentChatId}`),
+      orderByChild('timestamp'),
+      limitToLast(MESSAGES_BATCH_SIZE)
+    );
 
-    const fetchInitialAndListen = async () => {
-      const msgRef = query(
+    get(msgRef).then((snapshot) => {
+      const data: IMessage[] = [];
+      snapshot.forEach((child) => {
+        data.push(child.val());
+      });
+      const sorted = data.sort((a, b) => a.timestamp - b.timestamp);
+      setMessages(sorted);
+      if (sorted.length > 0) oldestTimestampRef.current = sorted[0].timestamp;
+
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
+
+      const liveQuery = query(
         ref(db, `messages/${currentChatId}`),
         orderByChild('timestamp'),
-        limitToLast(MESSAGES_BATCH_SIZE)
+        startAt(sorted[sorted.length - 1]?.timestamp + 1 || Date.now())
       );
 
-      const snapshot = await get(msgRef);
-      const initialMessages: IMessage[] = [];
-      snapshot.forEach((child) => {
-        initialMessages.push(child.val());
+      onChildAdded(liveQuery, (snap) => {
+        const newMsg = snap.val() as IMessage;
+        setMessages((prev) => [...prev, newMsg]);
+        dispatch(addMessage(newMsg));
+        scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
       });
+    });
 
-      if (initialMessages.length > 0) {
-        const sorted = initialMessages.sort((a, b) => a.timestamp - b.timestamp);
-        oldestTimestampRef.current = sorted[0].timestamp;
-        setMessages(sorted);
-        dispatch(addMessage(sorted[sorted.length - 1]));
-
-        setTimeout(() => {
-          scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
-
-        const lastTimestamp = sorted[sorted.length - 1].timestamp;
-
-        const liveQuery = query(
-          ref(db, `messages/${currentChatId}`),
-          orderByChild('timestamp'),
-          startAt(lastTimestamp + 1)
-        );
-
-        liveListenerUnsub = onChildAdded(liveQuery, (snapshot) => {
-          const newMsg = snapshot.val() as IMessage;
-          setMessages((prev) => [...prev, newMsg]);
-          dispatch(addMessage(newMsg));
-          scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-        });
-      } else {
-        setHasMore(false);
-      }
-
-      const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${currentChatId}`);
-      set(unreadRef, 0);
-    };
-
-    fetchInitialAndListen();
+    const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${currentChatId}`);
+    set(unreadRef, 0);
 
     return () => {
       setMessages([]);
       oldestTimestampRef.current = null;
-      setHasMore(true);
-      if (liveListenerUnsub) liveListenerUnsub();
     };
   }, [currentChatId]);
 
+  // Typing indicator shown to other user
+  useEffect(() => {
+    if (!currentChatId || !selectedUser?.uid) return;
+
+    const typingRef = ref(db, `typingStatus/${currentChatId}/${selectedUser.uid}`);
+    const onlineRef = ref(db, `onlineUsers/${selectedUser.uid}`);
+
+    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
+      const isTyping = snapshot.val();
+      if (isTyping) setStatus('Typing...');
+      else {
+        get(onlineRef).then((snap) => {
+          setStatus(snap.val() ? 'Online' : 'Offline');
+        });
+      }
+    });
+
+    return () => {
+      unsubscribeTyping();
+    };
+  }, [selectedUser?.uid, currentChatId]);
+
   const loadOlderMessages = async () => {
     if (!hasMore || loadingMore || !oldestTimestampRef.current) return;
+
     setLoadingMore(true);
+    const prevHeight = chatBoxRef.current?.scrollHeight || 0;
 
     const chatRef = query(
       ref(db, `messages/${currentChatId}`),
@@ -144,13 +155,9 @@ const Chat = () => {
       limitToLast(MESSAGES_BATCH_SIZE)
     );
 
-    const prevScrollHeight = chatBoxRef.current?.scrollHeight || 0;
-
     const snapshot = await get(chatRef);
     const older: IMessage[] = [];
-    snapshot.forEach((child) => {
-      older.push(child.val());
-    });
+    snapshot.forEach((child) => { older.push(child.val()); });
 
     if (older.length > 0) {
       const sorted = older.sort((a, b) => a.timestamp - b.timestamp);
@@ -161,73 +168,26 @@ const Chat = () => {
     }
 
     setTimeout(() => {
-      const newScrollHeight = chatBoxRef.current?.scrollHeight || 0;
-      chatBoxRef.current?.scrollTo(0, newScrollHeight - prevScrollHeight);
+      const newHeight = chatBoxRef.current?.scrollHeight || 0;
+      chatBoxRef.current?.scrollTo(0, newHeight - prevHeight);
     }, 50);
 
     setLoadingMore(false);
   };
 
-
-  useEffect(() => {
-    if (!selectedUser?.uid || !currentChatId || !currentUser?.uid) return;
-
-    const statusRef = ref(db, `onlineUsers/${selectedUser.uid}`);
-    const unsubscribeStatus = onValue(statusRef, (snapshot) => {
-      setStatus(snapshot.val() ? 'Online' : 'Offline');
-    });
-
-    const typingRef = ref(db, `typingStatus/${currentChatId}/${selectedUser.uid}`);
-    const unsubscribeTyping = onValue(typingRef, (snapshot) => {
-      const isTyping = snapshot.val();
-      if (isTyping) setStatus('Typing...');
-      else {
-        const onlineRef = ref(db, `onlineUsers/${selectedUser.uid}`);
-        onValue(onlineRef, (snap) => {
-          setStatus(snap.val() ? 'Online' : 'Offline');
-        }, { onlyOnce: true });
-      }
-    });
-
-    return () => {
-      unsubscribeStatus();
-      unsubscribeTyping();
-    };
-  }, [selectedUser?.uid, currentChatId]);
-
-  const handleTyping = () => {
-    if (!currentChatId || !currentUser?.uid) return;
-    const typingRef = ref(db, `typingStatus/${currentChatId}/${currentUser.uid}`);
-
-    if (!typingStartedRef.current) {
-      set(typingRef, true);
-      typingStartedRef.current = true;
-    }
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
-    typingTimeoutRef.current = setTimeout(() => {
-      set(typingRef, false);
-      typingStartedRef.current = false;
-    }, 2000);
-  };
-
   const handleSend = () => {
-    const plainText = editorRef.current?.editor?.getText().trim();
-    const htmlContent = editorRef.current?.editor?.getHTML();
-    if (!plainText || !currentChatId || !currentUser?.uid) return;
+    const text = editorRef.current?.editor?.getText().trim();
+    const html = editorRef.current?.editor?.getHTML();
+
+    if (!text || !currentChatId || !currentUser?.uid) return;
 
     const newMsg: IMessage = {
-      text: htmlContent ?? '',
+      text: html || '',
       senderId: currentUser.uid,
       timestamp: Date.now(),
     };
 
-    const chatRef = ref(db, `messages/${currentChatId}`);
-    push(chatRef, newMsg); 
-
+    push(ref(db, `messages/${currentChatId}`), newMsg);
     set(ref(db, `lastMessages/${currentChatId}`), {
       ...newMsg,
       receiverId: selectedUser.uid,
@@ -235,11 +195,10 @@ const Chat = () => {
 
     const unreadRef = ref(db, `unreadMessages/${selectedUser.uid}/${currentChatId}`);
     get(unreadRef).then((snap) => {
-      const currentCount = snap.val() || 0;
-      set(unreadRef, currentCount + 1);
+      const count = snap.val() || 0;
+      set(unreadRef, count + 1);
     });
 
-    setMessage('');
     editorRef.current?.editor?.commands.clearContent();
   };
 
@@ -248,65 +207,55 @@ const Chat = () => {
   };
 
   return (
-    <Box flex={3} display="flex" flexDirection="column" height="100vh" width="100%">
+    <Box flex={3} display="flex" flexDirection="column" height="100vh">
       {currentChatId ? (
         <>
-         
-          <Box display="flex" alignItems="center" px={2} py={1} borderBottom="1px solid #ccc" bgcolor="#f5f5f5">
+          <Box display="flex" alignItems="center" px={2} py={1} borderBottom="1px solid #ccc">
             <Avatar src={selectedUser.photoURL || ''} />
             <Box ml={2}>
-              <Typography variant="subtitle1">
-                {selectedUser.displayName || selectedUser.name || selectedUser.email}
-              </Typography>
-              <Typography variant="caption" color={status === 'Online' || status === 'Typing...' ? 'green' : 'textSecondary'}>
+              <Typography variant="subtitle1">{selectedUser.displayName || selectedUser.name || selectedUser.email}</Typography>
+              <Typography variant="caption" color={status === 'Offline' ? 'text.Secondary' : 'green'}>
                 {status}
               </Typography>
             </Box>
           </Box>
 
-          
           <Box
             ref={chatBoxRef}
             flex={1}
-            p={2}
             overflow="auto"
-            sx={{ backgroundColor: '#fafafa', display: 'flex', flexDirection: 'column', gap: '8px' }}
+            p={2}
+            sx={{ display: 'flex', flexDirection: 'column', gap: 1, background: '#f5f5f5' }}
             onScroll={(e) => {
-              if (e.currentTarget.scrollTop === 0 && hasMore) {
-                loadOlderMessages();
-              }
+              if (e.currentTarget.scrollTop === 0 && hasMore) loadOlderMessages();
             }}
           >
-            {messages.map((msg, index) => (
+            {messages.map((msg, i) => (
               <Box
-                key={index}
+                key={i}
                 alignSelf={msg.senderId === currentUser.uid ? 'flex-end' : 'flex-start'}
-                bgcolor={msg.senderId === currentUser.uid ? '#DCF8C6' : '#d2d4cff9'}
-                p={1.2}
+                bgcolor={msg.senderId === currentUser.uid ? '#DCF8C6' : '#fff'}
+                p={1.5}
                 borderRadius={2}
                 maxWidth="70%"
                 sx={{ wordBreak: 'break-word' }}
               >
-                <div dangerouslySetInnerHTML={{ __html: msg.text }} style={{ fontSize: '14px' }} />
+                <div dangerouslySetInnerHTML={{ __html: msg.text }} />
               </Box>
             ))}
             <div ref={scrollRef} />
           </Box>
 
-         
-          <Box px={2} py={1} borderTop="1px solid #ccc" bgcolor="#f5f5f5">
+          <Box px={2} py={1} borderTop="1px solid #ccc" bgcolor="#f9f9f9">
             <RichTextEditor
               ref={editorRef}
               content=""
               extensions={[StarterKit]}
-              onUpdate={({ editor }) => {
-                setMessage(editor.getHTML());
-                handleTyping();
-              }}
+              onUpdate={() => handleTyping()}
               editorProps={{
-                handleKeyDown: (_view, event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
+                handleKeyDown: (_, e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
                     handleSend();
                     return true;
                   }
@@ -342,7 +291,7 @@ const Chat = () => {
         </>
       ) : (
         <Box flex={1} display="flex" alignItems="center" justifyContent="center">
-          <Typography variant="h6" color="textSecondary">Select a contact to start chatting</Typography>
+          <Typography>Select a contact to start chatting</Typography>
         </Box>
       )}
     </Box>
