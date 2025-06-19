@@ -8,11 +8,10 @@ import {
   Avatar,
   Box,
   IconButton,
-  InputAdornment,
   Popover,
-  TextField,
-  Typography,
+  Typography
 } from '@mui/material';
+import StarterKit from "@tiptap/starter-kit";
 import EmojiPicker, { EmojiClickData } from 'emoji-picker-react';
 import {
   get,
@@ -22,9 +21,6 @@ import {
   ref,
   set,
 } from 'firebase/database';
-import { useEffect, useRef, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import StarterKit from "@tiptap/starter-kit";
 import {
   MenuButtonBold,
   MenuButtonItalic,
@@ -34,6 +30,8 @@ import {
   RichTextEditor,
   type RichTextEditorRef,
 } from "mui-tiptap";
+import { useEffect, useRef, useState } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
 
 interface IMessage {
   text: string;
@@ -153,7 +151,7 @@ const Chat = () => {
     typingTimeoutRef.current = setTimeout(() => {
       set(typingRef, false);
       typingStartedRef.current = false;
-    }, 2000);
+    }, 200);
   };
 
   const handleSend = () => {
