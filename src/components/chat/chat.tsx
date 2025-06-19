@@ -157,7 +157,11 @@ const Chat = () => {
   };
 
   const handleSend = () => {
-    if (!message.trim() || !currentChatId || !currentUser?.uid) return;
+    const plainText = editorRef.current?.editor?.getText().trim();
+    const htmlContent = editorRef.current?.editor?.getHTML();
+
+    if (!message.trim() || !currentChatId || !currentUser?.uid || 
+    !plainText) return;
 
     const newMsg: IMessage = {
       text: message,
@@ -183,10 +187,12 @@ const Chat = () => {
     });
 
     setMessage('');
+     editorRef.current?.editor?.commands.clearContent();
   };
 
   const handleEmojiClick = (emojiData: EmojiClickData) => {
-    setMessage((prev) => prev + emojiData.emoji);
+     const emoji = emojiData.emoji;
+    editorRef.current?.editor?.commands.insertContent(emoji);;
   };
 
   return (
