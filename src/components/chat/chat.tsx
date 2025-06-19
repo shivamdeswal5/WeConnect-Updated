@@ -73,97 +73,6 @@ const Chat = () => {
     onDisconnect(userRef).set(false);
   }, []);
 
-  // useEffect(() => {
-  //   if (!currentChatId) return;
-
-  //   const msgRef = query(
-  //     ref(db, `messages/${currentChatId}`),
-  //     orderByChild('timestamp'),
-  //     limitToLast(MESSAGES_BATCH_SIZE)
-  //   );
-
-  //   get(msgRef).then((snapshot) => {
-  //     const data: IMessage[] = [];
-  //     snapshot.forEach((child) => {
-  //       data.push(child.val());
-  //     });
-
-  //     if (data.length > 0) {
-  //       const sorted = data.sort((a, b) => a.timestamp - b.timestamp);
-  //       oldestTimestampRef.current = sorted[0].timestamp;
-  //       setMessages(sorted);
-  //       dispatch(addMessage(sorted[sorted.length - 1]));
-
-
-  //       const liveMsgRef = query(
-  //         ref(db, `messages/${currentChatId}`),
-  //         orderByChild('timestamp'),
-  //         startAt(sorted[sorted.length - 1].timestamp + 1)
-  //       );
-
-  //       onChildAdded(liveMsgRef, (snapshot) => {
-  //         const newMessage = snapshot.val() as IMessage;
-  //         setMessages((prev) => [...prev, newMessage]);
-  //         dispatch(addMessage(newMessage));
-  //         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  //       });
-
-  //       setTimeout(() => {
-  //         scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  //       }, 100);
-  //     } else {
-  //       setHasMore(false);
-  //     }
-  //   });
-
-  //   const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${currentChatId}`);
-  //   set(unreadRef, 0);
-
-  //   return () => {
-  //     setMessages([]);
-  //     oldestTimestampRef.current = null;
-  //     setHasMore(true);
-  //   };
-  // }, [currentChatId]);
-
-  // useEffect(() => {
-  //   if (!currentChatId || !currentUser?.uid) return;
-
-  //   const chatRef = query(
-  //     ref(db, `messages/${currentChatId}`),
-  //     orderByChild('timestamp'),
-  //     limitToLast(MESSAGES_BATCH_SIZE)
-  //   );
-
-  //   const messagesSet = new Set<string>();
-  //   const tempMessages: IMessage[] = [];
-
-  //   const unsubscribe = onChildAdded(chatRef, (snapshot) => {
-  //     const msg = snapshot.val() as IMessage;
-  //     const msgId = snapshot.key;
-
-  //     if (msgId && !messagesSet.has(msgId)) {
-  //       messagesSet.add(msgId);
-  //       tempMessages.push(msg);
-  //       setMessages((prev) => [...prev, msg]);
-
-  //       scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  //       dispatch(addMessage(msg));
-  //     }
-  //   });
-
-
-  //   const unreadRef = ref(db, `unreadMessages/${currentUser.uid}/${currentChatId}`);
-  //   set(unreadRef, 0);
-
-  //   return () => {
-  //     setMessages([]);
-  //     oldestTimestampRef.current = null;
-  //     setHasMore(true);
-  //     unsubscribe(); 
-  //   };
-  // }, [currentChatId]);
-
   useEffect(() => {
     if (!currentChatId) return;
 
@@ -224,35 +133,6 @@ const Chat = () => {
     };
   }, [currentChatId]);
 
-  const fetchInitialMessages = async () => {
-    const msgRef = query(
-      ref(db, `messages/${currentChatId}`),
-      orderByChild('timestamp'),
-      limitToLast(MESSAGES_BATCH_SIZE)
-    );
-
-    get(msgRef).then((snapshot) => {
-      const data: IMessage[] = [];
-      snapshot.forEach((child) => {
-        const val = child.val();
-        data.push(val);
-      });
-
-      if (data.length > 0) {
-        const sorted = data.sort((a, b) => a.timestamp - b.timestamp);
-        oldestTimestampRef.current = sorted[0].timestamp;
-        setMessages(sorted);
-        dispatch(addMessage(sorted[sorted.length - 1]));
-
-        setTimeout(() => {
-          scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }, 100);
-      } else {
-        setHasMore(false);
-      }
-    });
-  };
-
   const loadOlderMessages = async () => {
     if (!hasMore || loadingMore || !oldestTimestampRef.current) return;
     setLoadingMore(true);
@@ -288,41 +168,6 @@ const Chat = () => {
     setLoadingMore(false);
   };
 
-  // const loadOlderMessages = async () => {
-  //   if (!hasMore || loadingMore || !oldestTimestampRef.current) return;
-  //   setLoadingMore(true);
-  //   const chatRef = query(
-  //     ref(db, `messages/${currentChatId}`),
-  //     orderByChild('timestamp'),
-  //     endAt(oldestTimestampRef.current - 1),
-  //     limitToLast(MESSAGES_BATCH_SIZE)
-  //   );
-
-  //   const prevScrollHeight = chatBoxRef.current?.scrollHeight || 0;
-
-  //   get(chatRef).then((snapshot) => {
-  //     const older: IMessage[] = [];
-  //     snapshot.forEach((child) => {
-  //       const val = child.val();
-  //       older.push(val);
-  //     });
-
-  //     if (older.length > 0) {
-  //       const sorted = older.sort((a, b) => a.timestamp - b.timestamp);
-  //       oldestTimestampRef.current = sorted[0].timestamp;
-  //       setMessages((prev) => [...sorted, ...prev]);
-  //     } else {
-  //       setHasMore(false);
-  //     }
-
-  //     setTimeout(() => {
-  //       const newScrollHeight = chatBoxRef.current?.scrollHeight || 0;
-  //       chatBoxRef.current?.scrollTo(0, newScrollHeight - prevScrollHeight);
-  //     }, 50);
-
-  //     setLoadingMore(false);
-  //   });
-  // };
 
   useEffect(() => {
     if (!selectedUser?.uid || !currentChatId || !currentUser?.uid) return;
@@ -368,34 +213,6 @@ const Chat = () => {
       typingStartedRef.current = false;
     }, 2000);
   };
-
-  // const handleSend = () => {
-  //   const plainText = editorRef.current?.editor?.getText().trim();
-  //   const htmlContent = editorRef.current?.editor?.getHTML();
-  //   if (!plainText || !currentChatId || !currentUser?.uid) return;
-
-  //   const newMsg: IMessage = {
-  //     text: htmlContent ?? '',
-  //     senderId: currentUser.uid,
-  //     timestamp: Date.now(),
-  //   };
-
-  //   const chatRef = ref(db, `messages/${currentChatId}`);
-  //   push(chatRef, newMsg);
-  //   set(ref(db, `lastMessages/${currentChatId}`), {
-  //     ...newMsg,
-  //     receiverId: selectedUser.uid,
-  //   });
-
-  //   const unreadRef = ref(db, `unreadMessages/${selectedUser.uid}/${currentChatId}`);
-  //   get(unreadRef).then((snap) => {
-  //     const currentCount = snap.val() || 0;
-  //     set(unreadRef, currentCount + 1);
-  //   });
-
-  //   setMessage('');
-  //   editorRef.current?.editor?.commands.clearContent();
-  // };
 
   const handleSend = () => {
     const plainText = editorRef.current?.editor?.getText().trim();

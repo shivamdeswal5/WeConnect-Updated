@@ -187,7 +187,7 @@ const Contacts = () => {
     return () => {
       unsubscribers.forEach((unsub) => unsub());
     };
-  }, [users]);
+  }, [currentUser.uid]);
 
   return (
     <Box
