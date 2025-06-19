@@ -24,16 +24,16 @@ import {
 } from 'firebase/database';
 import { useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-// import StarterKit from "@tiptap/starter-kit";
-// import {
-//   MenuButtonBold,
-//   MenuButtonItalic,
-//   MenuControlsContainer,
-//   MenuDivider,
-//   MenuSelectHeading,
-//   RichTextEditor,
-//   type RichTextEditorRef,
-// } from "mui-tiptap";
+import StarterKit from "@tiptap/starter-kit";
+import {
+  MenuButtonBold,
+  MenuButtonItalic,
+  MenuControlsContainer,
+  MenuDivider,
+  MenuSelectHeading,
+  RichTextEditor,
+  type RichTextEditorRef,
+} from "mui-tiptap";
 
 interface IMessage {
   text: string;
@@ -46,7 +46,7 @@ const Chat = () => {
   const [status, setStatus] = useState('Offline');
   const [messages, setMessagesState] = useState<IMessage[]>([]);
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-
+  const editorRef = useRef<RichTextEditorRef>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const dispatch = useDispatch();
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -252,25 +252,39 @@ const Chat = () => {
           </Box>
 
           <Box px={2} py={1} borderTop="1px solid #ccc" bgcolor="#f5f5f5">
-            <TextField
-              fullWidth
-              placeholder="Type a message"
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-              onInput={handleTyping}
-              InputProps={{
-                endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
-                      <EmojiEmotionsIcon />
-                    </IconButton>
-                    <IconButton onClick={handleSend}>
-                      <SendIcon />
-                    </IconButton>
-                  </InputAdornment>
-                ),
+            <RichTextEditor
+              ref={editorRef}
+              content=""
+              extensions={[StarterKit]}
+              onUpdate={({ editor }) => {
+                setMessage(editor.getHTML());
+                handleTyping();
               }}
+              editorProps={{
+                handleKeyDown: (_view, event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSend();
+                    return true;
+                  }
+                  return false;
+                },
+              }}
+              renderControls={() => (
+                <MenuControlsContainer>
+                  <MenuSelectHeading />
+                  <MenuDivider />
+                  <MenuButtonBold />
+                  <MenuButtonItalic />
+                  <MenuDivider />
+                  <IconButton onClick={(e) => setAnchorEl(e.currentTarget)}>
+                    <EmojiEmotionsIcon />
+                  </IconButton>
+                  <IconButton onClick={handleSend}>
+                    <SendIcon />
+                  </IconButton>
+                </MenuControlsContainer>
+              )}
             />
             <Popover
               open={Boolean(anchorEl)}
@@ -287,20 +301,6 @@ const Chat = () => {
             >
               <EmojiPicker onEmojiClick={handleEmojiClick} height={350} />
             </Popover>
-
-            {/* <RichTextEditor
-              extensions={[StarterKit]}
-              content="Enter Text"
-              renderControls={() => (
-                <MenuControlsContainer>
-                  <MenuSelectHeading />
-                  <MenuDivider />
-                  <MenuButtonBold />
-                  <MenuButtonItalic />
-                </MenuControlsContainer>
-
-              )}
-            /> */}
 
           </Box>
         </>
